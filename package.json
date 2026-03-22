@@ -13,12 +13,9 @@
     "prepare": "npm run build",
     "start": "node dist/http-server.js",
     "dev": "tsx src/http-server.ts",
-    "test": "npm run build && vitest",
-    "test:unit": "vitest run --config vitest.config.unit.ts",
-    "test:e2e": "npm run build && vitest run --config vitest.config.e2e.ts",
-    "test:e2e:local": "npm run build && vitest run --config vitest.config.e2e.ts",
+    "test": "npm run build && vitest run --config vitest.config.unit.ts",
     "test:coverage": "npm run build && vitest --coverage --config vitest.config.unit.ts",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch --config vitest.config.unit.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
