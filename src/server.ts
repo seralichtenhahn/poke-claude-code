@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -13,7 +12,6 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as pathResolve } from 'node:path';
 import * as path from 'path';
-import { readFileSync } from 'node:fs';
 
 // Server version - update this when releasing new versions
 const SERVER_VERSION = "1.10.12";
@@ -329,16 +327,10 @@ export class ClaudeCodeServer {
   }
 
   /**
-   * Start the MCP server
+   * Connect the MCP server to the given transport
    */
-  async run(): Promise<void> {
-    // Revert to original server start logic if listen caused errors
-    const transport = new StdioServerTransport();
+  async run(transport: Transport): Promise<void> {
     await this.server.connect(transport);
-    console.error('Claude Code MCP server running on stdio');
+    console.error('Claude Code MCP server connected');
   }
 }
-
-// Create and run the server if this is the main module
-const server = new ClaudeCodeServer();
-server.run().catch(console.error);

@@ -26,7 +26,7 @@ This method is suitable if you prefer not to install the server globally or want
     ```
 
 4.  **Configure MCP Client for `start.sh`:**
-    Update your `mcp.json` file (e.g., `~/.codeium/windsurf/mcp_config.json` or `~/.cursor/mcp.json`) to point to the `start.sh` script:
+    Update your MCP client configuration file to point to the `start.sh` script:
     ```json
     {
       "mcpServers": {

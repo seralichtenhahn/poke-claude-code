@@ -7,7 +7,7 @@
 
 An MCP (Model Context Protocol) server that allows running Claude Code in one-shot mode with permissions bypassed automatically.
 
-Did you notice that Cursor sometimes struggles with complex, multi-step edits or operations? This server, with its powerful unified `claude_code` tool, aims to make Claude a more direct and capable agent for your coding tasks.
+This server, with its powerful unified `claude_code` tool, aims to make Claude a more direct and capable agent for your coding tasks.
 
 <img src="assets/screenshot.png" width="300" alt="Screenshot">
 
@@ -22,10 +22,10 @@ This MCP server provides one tool that can be used by LLMs to interact with Clau
 
 ## Benefits
 
-- Claude/Windsurf often have trouble editing files. Claude Code is better and faster at it.
+- Claude Code is great at editing files, running multi-step tasks, and handling complex operations.
 - Multiple commands can be queued instead of direct execution. This saves context space so more important stuff is retained longer, fewer compacts happen.
-- File ops, git, or other operations don't need costy models. Claude Code is pretty cost effective if you sign up for Antropic Max. You can use Gemini or o3 in Max mode and save costs with offloading tasks to cheaper models.
-- Claude has wider system access and can do things that Cursor/Windsurf can't do (or believe they can't), so whenever they are stuck just ask them "use claude code" and it will usually un-stuck them.
+- File ops, git, or other operations don't need costly models. Claude Code is pretty cost effective if you sign up for Anthropic Max.
+- Claude has wider system access and can handle tasks that other tools struggle with.
 - Agents in Agents rules.
 
 <img src="assets/agents_in_agents_meme.jpg" alt="Agents in Agents Meme">
@@ -105,29 +105,11 @@ macOS might ask for all kind of folder permissions the first time the tool runs 
 
 ## Connecting to Your MCP Client
 
-After setting up the server, you need to configure your MCP client (like Cursor or others that use `mcp.json` or `mcp_config.json`).
+After setting up the server, you need to configure your MCP client.
 
 ### MCP Configuration File
 
-The configuration is typically done in a JSON file. The name and location can vary depending on your client.
-
-#### Cursor
-
-Cursor uses `mcp.json`.
-- **macOS:** `~/.cursor/mcp.json`
-- **Windows:** `%APPDATA%\\Cursor\\mcp.json`
-- **Linux:** `~/.config/cursor/mcp.json`
-
-#### Windsurf
-
-Windsurf users use `mcp_config.json`
-- **macOS:** `~/.codeium/windsurf/mcp_config.json`
-- **Windows:** `%APPDATA%\\Codeium\\windsurf\\mcp_config.json`
-- **Linux:** `~/.config/.codeium/windsurf/mcp_config.json`
-
-(Note: In some mixed setups, if Cursor is also installed, these clients might fall back to using Cursor's `~/.cursor/mcp.json` path. Prioritize the Codeium-specific paths if using the Codeium extension.)
-
-Create this file if it doesn't exist. Add or update the configuration for `claude_code`:
+The configuration is typically done in a JSON file. The name and location can vary depending on your client. Create or update the configuration for `claude_code`:
 
 ## Tools Provided
 
@@ -159,8 +141,6 @@ Here are some visual examples of the server in action:
 <img src="assets/claude_tool_git_example.png" alt="Claude Tool Git Example" width="50%">
 
 <img src="assets/additional_claude_screenshot.png" alt="Additional Claude Screenshot" width="50%">
-
-<img src="assets/cursor-screenshot.png" alt="Cursor Screenshot" width="50%">
 
 ### Fixing ESLint Setup
 

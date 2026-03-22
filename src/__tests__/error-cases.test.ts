@@ -368,7 +368,8 @@ describe('Error Handling Tests', () => {
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
       mockServerInstance.connect.mockRejectedValue(new Error('Connection failed'));
       
-      await expect(server.run()).rejects.toThrow('Connection failed');
+      const mockTransport = { start: vi.fn(), close: vi.fn(), send: vi.fn() } as any;
+      await expect(server.run(mockTransport)).rejects.toThrow('Connection failed');
     });
   });
 });
