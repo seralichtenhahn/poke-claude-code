@@ -1,111 +1,70 @@
-# Local Installation & Development Setup
+# Local Development Setup
 
-This guide is for developers who want to contribute to this server, run it directly from a cloned repository, or use `npm link` for local testing.
+This guide is for developers who want to contribute or run the server from a cloned repository.
 
-For general users, the recommended methods (global NPM install or `npx`) are covered in the main [README.md](../README.md).
+## Setup
 
-## Option 1: Running Directly from a Cloned Repository (using `start.sh`)
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/seralichtenhahn/poke-claude-code.git
+   cd poke-claude-code
+   ```
 
-This method is suitable if you prefer not to install the server globally or want to manage it directly within a specific path for development or testing.
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+   This automatically builds the project via the `prepare` script.
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/steipete/claude-code-mcp.git # Or your fork/actual repo URL
-    cd claude-code-mcp
-    ```
+3. **Ensure Claude CLI is set up:**
+   ```bash
+   claude --dangerously-skip-permissions
+   ```
+   Follow the prompts to accept (one-time).
 
-2.  **Install dependencies:**
-    This will also install `tsx` for direct TypeScript execution via `start.sh`.
-    ```bash
-    npm install
-    ```
+4. **Start the server:**
+   ```bash
+   npm start          # runs compiled dist/
+   npm run dev        # runs TypeScript directly with tsx (auto-reloads)
+   ```
 
-3.  **Make the start script executable:**
-    ```bash
-    chmod +x start.sh
-    ```
+## Development with `npm link`
 
-4.  **Configure MCP Client for `start.sh`:**
-    Update your MCP client configuration file to point to the `start.sh` script:
-    ```json
-    {
-      "mcpServers": {
-        "claude_code": {
-          "type": "stdio",
-          "command": ["/absolute/path/to/claude-mcp-server/start.sh"],
-          "args": []
-        }
-        // ... other MCP server configurations
-      }
-    }
-    ```
-    **Important:** Replace `/absolute/path/to/claude-mcp-server` with the actual absolute path to where you cloned the server.
+To test the `poke-claude-code` CLI command locally:
 
-5.  **First-Time Claude CLI Permissions:**
-    As mentioned in the main README, ensure you've run the Claude CLI once with `--dangerously-skip-permissions` to accept terms:
-    ```bash
-    claude -p "hello" --dangerously-skip-permissions
-    # Or ~/.claude/local/claude -p "hello" --dangerously-skip-permissions
-    ```
+```bash
+npm link
+```
 
-6.  **Environment Variables for `start.sh` (Optional):**
-    You can customize the server behavior by setting environment variables before running `start.sh` or by editing the `start.sh` script itself:
-    - `CLAUDE_CLI_PATH`: Set a custom absolute path to the Claude CLI executable.
-    - `MCP_CLAUDE_DEBUG`: Set to `true` to enable verbose debug logging from the MCP server.
-    - `CLAUDE_CLI_TOOLS_DEFAULT`: Comma-separated list of default tools.
-    - `CLAUDE_CLI_TOOLS_DANGEROUS`: Comma-separated list of tools to always enable.
-    Refer to `start.sh` and the main README's "Configuration via Environment Variables" section for more details.
+After linking, running `poke-claude-code` anywhere will execute your local build. Rebuild with `npm run build` after changes.
 
-## Option 2: Local Development with `npm link`
+## Project Structure
 
-This method allows you to install the package globally but have it point to your local cloned repository. This is useful for testing the global command (`claude-code-mcp`) with your local changes.
+- `src/server.ts` — MCP server class with tool handlers (Claude CLI integration)
+- `src/http-server.ts` — HTTP server entry point + Poke tunnel setup
+- `dist/` — Compiled output (gitignored, built via `npm run build`)
 
-1.  **Clone the repository (if not already done):**
-    ```bash
-    git clone https://github.com/steipete/claude-code-mcp.git # Or your fork/actual repo URL
-    cd claude-code-mcp
-    ```
+## Environment Variables
 
-2.  **Install dependencies and build:**
-    ```bash
-    npm install       # Install dependencies
-    npm run build     # Compile TypeScript to the dist/ directory
-    ```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Local HTTP server port | `3000` |
+| `POKE_NAME` | Display name for the tunnel in Poke | `claude-code-mcp` |
+| `CLAUDE_CLI_NAME` | Custom Claude CLI binary name or absolute path | `claude` |
+| `MCP_CLAUDE_DEBUG` | Enable verbose debug logging | `false` |
 
-3.  **Link the package:**
-    This makes `claude-code-mcp` (as defined in `package.json`'s `bin` field) available globally, pointing to your local `dist/server.js`.
-    ```bash
-    npm link
-    ```
-    After linking, running `claude-code-mcp` in your terminal will execute your local build.
+## Testing
 
-4.  **Configure MCP Client for Linked Command:**
-    Update your `mcp.json` file to use the `claude-code-mcp` command (which now points to your local linked version):
-    ```json
-    {
-      "mcpServers": {
-        "claude_code": {
-          "type": "stdio",
-          "command": ["claude-code-mcp"],
-          "args": [],
-          "env": {
-            "MCP_CLAUDE_DEBUG": "false" // Or "true" for debugging
-            // You can set other ENV VARS here too if needed for the linked command
-          }
-        }
-      }
-    }
-    ```
+```bash
+npm test              # all tests
+npm run test:unit     # unit tests only
+npm run test:e2e      # e2e tests (with mocks)
+npm run test:watch    # watch mode
+npm run test:coverage # coverage report
+```
 
-5.  **Rebuilding after changes:**
-    If you make changes to the TypeScript source (`src/`), you'll need to rebuild for `npm link` to reflect them:
-    ```bash
-    npm run build
-    ```
-    There's no need to run `npm link` again unless `package.json` (especially the `bin` field) changes.
+## Notes
 
-## General Development Notes
-
-- **TypeScript:** The server is written in TypeScript. Code is in the `src/` directory and compiled to `dist/`.
-- **Prerequisites:** Ensure Node.js v20+ and a working Claude CLI are installed.
-- **Contributing:** Submit issues and pull requests to the main [GitHub repository](https://github.com/steipete/claude-code-mcp).
+- TypeScript source is in `src/`, compiled to `dist/` with `tsc`
+- Node.js v20+ required
+- The `prepare` script auto-builds on `npm install`

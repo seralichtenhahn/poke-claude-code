@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "start": "node dist/http-server.js",
     "dev": "tsx src/http-server.ts",
     "test": "npm run build && vitest",

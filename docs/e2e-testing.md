@@ -1,4 +1,4 @@
-# End-to-End Testing for Claude Code MCP
+# End-to-End Testing for Poke Claude Code
 
 This document explains how to run and maintain the end-to-end tests for the Claude Code MCP server.
 
