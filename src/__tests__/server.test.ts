@@ -356,35 +356,7 @@ describe('ClaudeCodeServer Unit Tests', () => {
       expect(consoleErrorSpy).toHaveBeenCalledWith('[Error]', expect.any(Error));
     });
 
-    it('should handle SIGINT', async () => {
-      mockHomedir.mockReturnValue('/home/user');
-      mockExistsSync.mockReturnValue(true);
-      
-      // Set up Server mock first
-      vi.mocked(Server).mockImplementation(() => ({
-        setRequestHandler: vi.fn(),
-        connect: vi.fn(),
-        close: vi.fn(),
-        onerror: undefined,
-      }) as any);
-      
-      const module = await import('../server.js');
-      // @ts-ignore
-      const { ClaudeCodeServer } = module;
-      
-      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-      const server = new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
-      // Emit SIGINT
-      const sigintHandler = process.listeners('SIGINT').slice(-1)[0] as any;
-      await sigintHandler();
-      
-      expect(mockServerInstance.close).toHaveBeenCalled();
-      expect(exitSpy).toHaveBeenCalledWith(0);
-      
-      exitSpy.mockRestore();
-    });
+    // SIGINT handling is managed by http-server.ts, not individual ClaudeCodeServer instances
   });
 
   describe('Tool handler implementation', () => {

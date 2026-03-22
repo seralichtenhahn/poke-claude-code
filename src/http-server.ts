@@ -4,13 +4,35 @@ import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { PokeTunnel, isLoggedIn, login } from 'poke';
-import { ClaudeCodeServer, debugLog } from './server.js';
+import { ClaudeCodeServer } from './server.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const POKE_NAME = process.env.POKE_NAME || 'claude-code-mcp';
 
 // Session management: each MCP session gets its own transport + server
-const sessions: Record<string, { transport: StreamableHTTPServerTransport; server: ClaudeCodeServer }> = {};
+const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle timeout
+const sessions: Record<string, { transport: StreamableHTTPServerTransport; server: ClaudeCodeServer; lastActivity: number }> = {};
+
+function sessionCount(): number {
+  return Object.keys(sessions).length;
+}
+
+function log(msg: string): void {
+  const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+  console.error(`${ts} ${msg}`);
+}
+
+// Clean up idle sessions periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, session] of Object.entries(sessions)) {
+    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+      session.transport.close();
+      delete sessions[sid];
+      log(`session ${sid.slice(0, 8)} expired  (${sessionCount()} active)`);
+    }
+  }
+}, 60_000);
 
 function parseBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -42,21 +64,22 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
       if (sessionId && sessions[sessionId]) {
+        sessions[sessionId].lastActivity = Date.now();
         await sessions[sessionId].transport.handleRequest(req, res, body);
       } else if (!sessionId && isInitializeRequest(body)) {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid: string) => {
-            debugLog(`[HTTP] Session initialized: ${sid}`);
-            sessions[sid] = { transport, server: mcpServer };
+            sessions[sid] = { transport, server: mcpServer, lastActivity: Date.now() };
+            log(`session ${sid.slice(0, 8)} opened  (${sessionCount()} active)`);
           },
         });
 
         transport.onclose = () => {
           const sid = transport.sessionId;
           if (sid && sessions[sid]) {
-            debugLog(`[HTTP] Session closed: ${sid}`);
             delete sessions[sid];
+            log(`session ${sid.slice(0, 8)} closed  (${sessionCount()} active)`);
           }
         };
 
@@ -92,7 +115,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       res.end('Method Not Allowed');
     }
   } catch (error) {
-    console.error('[HTTP] Error handling request:', error);
+    log(`request error: ${error}`);
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -106,48 +129,50 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
 // Start HTTP server, then Poke tunnel
 httpServer.listen(PORT, '127.0.0.1', () => {
-  console.error(`MCP HTTP server listening on http://127.0.0.1:${PORT}/mcp`);
+  log(`server listening on http://127.0.0.1:${PORT}/mcp`);
 });
 
 // Ensure user is logged in to Poke
 if (!isLoggedIn()) {
-  console.error('Not logged in to Poke. Starting login flow...');
+  log('not logged in to Poke — opening browser...');
   await login({ openBrowser: true });
 }
 
 const tunnelUrl = `http://127.0.0.1:${PORT}/mcp`;
-console.error(`Starting Poke tunnel: ${tunnelUrl}`);
+log(`connecting Poke tunnel → ${tunnelUrl}`);
 
 const tunnel = new PokeTunnel({ url: tunnelUrl, name: POKE_NAME });
 
+
+
 tunnel.on('connected', (info) => {
-  console.error(`Poke tunnel connected!`);
-  console.error(`  Tunnel URL: ${info.tunnelUrl}`);
-  console.error(`  Local URL:  ${info.localUrl}`);
+  log(`tunnel connected`);
+  log(`  remote: ${info.tunnelUrl}`);
+  log(`  local:  ${info.localUrl}`);
 });
 
 tunnel.on('error', (error) => {
-  console.error(`Poke tunnel error: ${error.message}`);
+  log(`tunnel error: ${error.message}`);
 });
 
 tunnel.on('disconnected', () => {
-  console.error('Poke tunnel disconnected');
+  log('tunnel disconnected');
 });
 
 tunnel.on('toolsSynced', ({ toolCount }) => {
-  debugLog(`[Poke] Tools synced: ${toolCount} tools`);
+  log(`tools synced (${toolCount} tools)`);
 });
 
 try {
   await tunnel.start();
 } catch (error: any) {
-  console.error(`Failed to start Poke tunnel: ${error.message}`);
+  log(`failed to start tunnel: ${error.message}`);
   process.exit(1);
 }
 
 // Graceful shutdown
 async function shutdown() {
-  console.error('Shutting down...');
+  log('shutting down...');
 
   await tunnel.stop();
 

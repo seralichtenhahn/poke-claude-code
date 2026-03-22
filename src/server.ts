@@ -10,11 +10,15 @@ import {
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve as pathResolve } from 'node:path';
+import { isAbsolute, join, resolve as pathResolve } from 'node:path';
+import { readdirSync } from 'node:fs';
 import * as path from 'path';
 
 // Server version - update this when releasing new versions
 const SERVER_VERSION = "1.10.12";
+
+// Base directory for repo name auto-discovery
+const REPOS_BASE_DIR = process.env.REPOS_BASE_DIR || '';
 
 // Define debugMode globally using const
 const debugMode = process.env.MCP_CLAUDE_DEBUG === 'true';
@@ -25,11 +29,64 @@ let isFirstToolUse = true;
 // Capture server startup time when the module loads
 const serverStartupTime = new Date().toISOString();
 
+// Cache CLI path at module level so it's resolved once
+let cachedCliPath: string | null = null;
+function getClaudeCli(): string {
+  if (!cachedCliPath) {
+    cachedCliPath = findClaudeCli();
+    console.error(`[Setup] Using Claude CLI command/path: ${cachedCliPath}`);
+  }
+  return cachedCliPath;
+}
+
 // Dedicated debug logging function
 export function debugLog(message?: any, ...optionalParams: any[]): void {
   if (debugMode) {
     console.error(message, ...optionalParams);
   }
+}
+
+/**
+ * Resolve a workFolder value.
+ * - Absolute paths are returned as-is.
+ * - Non-absolute strings are treated as repo names and looked up
+ *   as subdirectories of REPOS_BASE_DIR.
+ * Returns the resolved absolute path, or null if not found.
+ */
+function resolveWorkFolder(workFolder: string): string | null {
+  if (isAbsolute(workFolder)) {
+    return workFolder;
+  }
+
+  // Treat as repo name — look up in REPOS_BASE_DIR
+  if (!REPOS_BASE_DIR) {
+    debugLog(`[Warning] workFolder "${workFolder}" is not an absolute path and REPOS_BASE_DIR is not set`);
+    return null;
+  }
+
+  const candidate = join(REPOS_BASE_DIR, workFolder);
+  if (existsSync(candidate)) {
+    debugLog(`[Debug] Resolved repo name "${workFolder}" to ${candidate}`);
+    return candidate;
+  }
+
+  // Case-insensitive search through the base dir
+  try {
+    const entries = readdirSync(REPOS_BASE_DIR, { withFileTypes: true });
+    const match = entries.find(
+      (e) => e.isDirectory() && e.name.toLowerCase() === workFolder.toLowerCase()
+    );
+    if (match) {
+      const resolved = join(REPOS_BASE_DIR, match.name);
+      debugLog(`[Debug] Resolved repo name "${workFolder}" (case-insensitive) to ${resolved}`);
+      return resolved;
+    }
+  } catch {
+    debugLog(`[Warning] Could not read REPOS_BASE_DIR: ${REPOS_BASE_DIR}`);
+  }
+
+  debugLog(`[Warning] Repo "${workFolder}" not found in ${REPOS_BASE_DIR}`);
+  return null;
 }
 
 /**
@@ -144,9 +201,7 @@ export class ClaudeCodeServer {
   private packageVersion: string; // Add packageVersion property
 
   constructor() {
-    // Use the simplified findClaudeCli function
-    this.claudeCliPath = findClaudeCli(); // Removed debugMode argument
-    console.error(`[Setup] Using Claude CLI command/path: ${this.claudeCliPath}`);
+    this.claudeCliPath = getClaudeCli();
     this.packageVersion = SERVER_VERSION;
 
     this.server = new Server(
@@ -164,10 +219,6 @@ export class ClaudeCodeServer {
     this.setupToolHandlers();
 
     this.server.onerror = (error) => console.error('[Error]', error);
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
-    });
   }
 
   /**
@@ -222,7 +273,7 @@ export class ClaudeCodeServer {
               },
               workFolder: {
                 type: 'string',
-                description: 'Mandatory when using file operations or referencing any file. The working directory for the Claude CLI execution. Must be an absolute path.',
+                description: 'The working directory for the Claude CLI execution. Can be an absolute path or a repository name (auto-resolved from REPOS_BASE_DIR). Defaults to REPOS_BASE_DIR if set, otherwise the user\'s home directory.',
               },
             },
             required: ['prompt'],
@@ -260,23 +311,33 @@ export class ClaudeCodeServer {
       }
 
       // Determine the working directory
-      let effectiveCwd = homedir(); // Default CWD is user's home directory
+      let effectiveCwd = REPOS_BASE_DIR || homedir();
 
       // Check if workFolder is provided in the tool arguments
       if (toolArguments.workFolder && typeof toolArguments.workFolder === 'string') {
-        const resolvedCwd = pathResolve(toolArguments.workFolder);
-        debugLog(`[Debug] Specified workFolder: ${toolArguments.workFolder}, Resolved to: ${resolvedCwd}`);
-
-        // Check if the resolved path exists
-        if (existsSync(resolvedCwd)) {
-          effectiveCwd = resolvedCwd;
-          debugLog(`[Debug] Using workFolder as CWD: ${effectiveCwd}`);
+        const resolved = resolveWorkFolder(toolArguments.workFolder);
+        if (resolved) {
+          const resolvedCwd = pathResolve(resolved);
+          debugLog(`[Debug] Specified workFolder: ${toolArguments.workFolder}, Resolved to: ${resolvedCwd}`);
+          if (existsSync(resolvedCwd)) {
+            effectiveCwd = resolvedCwd;
+            debugLog(`[Debug] Using workFolder as CWD: ${effectiveCwd}`);
+          } else {
+            debugLog(`[Warning] Specified workFolder does not exist: ${resolvedCwd}. Using default: ${effectiveCwd}`);
+          }
         } else {
-          debugLog(`[Warning] Specified workFolder does not exist: ${resolvedCwd}. Using default: ${effectiveCwd}`);
+          debugLog(`[Warning] Could not resolve workFolder: ${toolArguments.workFolder}. Using default: ${effectiveCwd}`);
         }
       } else {
         debugLog(`[Debug] No workFolder provided, using default CWD: ${effectiveCwd}`);
       }
+
+      // Truncate prompt for display
+      const promptPreview = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt;
+      const cwdLabel = path.basename(effectiveCwd);
+      console.error(`▶ [${cwdLabel}] ${promptPreview}`);
+
+      const startTime = Date.now();
 
       try {
         debugLog(`[Debug] Attempting to execute Claude CLI with prompt: "${prompt}" in CWD: "${effectiveCwd}"`);
@@ -302,11 +363,18 @@ export class ClaudeCodeServer {
           debugLog('[Debug] Claude CLI stderr:', stderr.trim());
         }
 
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const outputLen = stdout.length;
+        console.error(`✓ [${cwdLabel}] done in ${duration}s (${outputLen} chars)`);
+
         // Return stdout content, even if there was stderr, as claude-cli might output main result to stdout.
         return { content: [{ type: 'text', text: stdout }] };
 
       } catch (error: any) {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.error(`✗ [${cwdLabel}] failed after ${duration}s — ${error.message || 'Unknown error'}`);
         debugLog('[Error] Error executing Claude CLI:', error);
+
         let errorMessage = error.message || 'Unknown error';
         // Attempt to include stderr and stdout from the error object if spawnAsync attached them
         if (error.stderr) {
@@ -317,10 +385,8 @@ export class ClaudeCodeServer {
         }
 
         if (error.signal === 'SIGTERM' || (error.message && error.message.includes('ETIMEDOUT')) || (error.code === 'ETIMEDOUT')) {
-          // Reverting to InternalError due to lint issues, but with a specific timeout message.
           throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
         }
-        // ErrorCode.ToolCallFailed should be ErrorCode.InternalError or a more specific execution error if available
         throw new McpError(ErrorCode.InternalError, `Claude CLI execution failed: ${errorMessage}`);
       }
     });
@@ -331,6 +397,6 @@ export class ClaudeCodeServer {
    */
   async run(transport: Transport): Promise<void> {
     await this.server.connect(transport);
-    console.error('Claude Code MCP server connected');
+    debugLog('[Debug] MCP session connected');
   }
 }
