@@ -8,11 +8,12 @@ import {
   type ServerResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve as pathResolve } from 'node:path';
-import { readdirSync } from 'node:fs';
 import * as path from 'path';
+import { Poke } from 'poke';
 
 // Server version - update this when releasing new versions
 const SERVER_VERSION = "1.10.12";
@@ -37,6 +38,32 @@ function getClaudeCli(): string {
     console.error(`[Setup] Using Claude CLI command/path: ${cachedCliPath}`);
   }
   return cachedCliPath;
+}
+
+// Poke client for delivering async results (lazy-init for testability)
+let _poke: InstanceType<typeof Poke> | null = null;
+function getPoke(): InstanceType<typeof Poke> {
+  if (!_poke) _poke = new Poke();
+  return _poke;
+}
+
+async function deliverViaPoke(message: string): Promise<void> {
+  try {
+    await getPoke().sendMessage(message);
+  } catch (e) {
+    console.error('sendMessage failed:', e);
+  }
+}
+
+// Running tasks map for duplicate detection
+const runningTasks = new Map<string, { id: string; startedAt: number }>();
+
+function taskKey(prompt: string, cwd: string): string {
+  return `${cwd}::${prompt}`;
+}
+
+export function runningTaskCount(): number {
+  return runningTasks.size;
 }
 
 // Dedicated debug logging function
@@ -230,38 +257,27 @@ export class ClaudeCodeServer {
       tools: [
         {
           name: 'claude_code',
-          description: `Claude Code Agent: Your versatile multi-modal assistant for code, file, Git, and terminal operations via Claude CLI. Use \`workFolder\` for contextual execution.
+          description: `Claude Code Agent: Run Claude CLI for code, file, Git, and terminal operations. **This tool is async** — it returns immediately with a task ID, and the result is delivered later as a message.
 
-• File ops: Create, read, (fuzzy) edit, move, copy, delete, list files, analyze/ocr images, file content analysis
-    └─ e.g., "Create /tmp/log.txt with 'system boot'", "Edit main.py to replace 'debug_mode = True' with 'debug_mode = False'", "List files in /src", "Move a specific section somewhere else"
+**IMPORTANT: Async execution model**
+- This tool returns instantly with "Task [id] accepted".
+- The actual work runs in the background.
+- When complete, the result is sent as a separate message (not as the tool response).
+- Do NOT wait for or poll the tool response for results. Move on and process the result when the message arrives.
+- If you send the same prompt + workFolder while a task is still running, you'll get a "duplicate request" response.
 
-• Code: Generate / analyse / refactor / fix
-    └─ e.g. "Generate Python to parse CSV→JSON", "Find bugs in my_script.py"
+**Capabilities**
+- File ops: create, read, edit, move, copy, delete, list, analyze
+- Code: generate, analyse, refactor, fix
+- Git: stage, commit, push, tag, create PRs
+- Terminal: run any CLI command
+- Multi-step workflows (version bumps, changelog updates, releases)
 
-• Git: Stage ▸ commit ▸ push ▸ tag (any workflow)
-    └─ "Commit '/workspace/src/main.java' with 'feat: user auth' to develop."
-
-• Terminal: Run any CLI cmd or open URLs
-    └─ "npm run build", "Open https://developer.mozilla.org"
-
-• Web search + summarise content on-the-fly
-
-• Multi-step workflows  (Version bumps, changelog updates, release tagging, etc.)
-
-• GitHub integration  Create PRs, check CI status
-
-• Confused or stuck on an issue? Ask Claude Code for a second opinion, it might surprise you!
-
-**Prompt tips**
-
-1. Be concise, explicit & step-by-step for complex tasks. No need for niceties, this is a tool to get things done.
-2. For multi-line text, write it to a temporary file in the project root, use that file, then delete it.
-3. If you get a timeout, split the task into smaller steps.
-4. **Seeking a second opinion/analysis**: If you're stuck or want advice, you can ask \`claude_code\` to analyze a problem and suggest solutions. Clearly state in your prompt that you are looking for analysis only and no actual file modifications should be made.
-5. If workFolder is set to the project path, there is no need to repeat that path in the prompt and you can use relative paths for files.
-6. Claude Code is really good at complex multi-step file operations and refactorings and faster than your native edit features.
-7. Combine file operations, README updates, and Git commands in a sequence.
-8. Claude can do much more, just ask it!
+**Tips**
+1. Be concise and explicit. Step-by-step for complex tasks.
+2. Set \`workFolder\` to the repo name or absolute path so Claude runs in the right directory.
+3. Claude Code handles complex multi-step file operations and refactorings well.
+4. Combine file operations, README updates, and Git commands in a single prompt.
 
         `,
           inputSchema: {
@@ -335,60 +351,78 @@ export class ClaudeCodeServer {
       // Truncate prompt for display
       const promptPreview = prompt.length > 80 ? prompt.slice(0, 80) + '…' : prompt;
       const cwdLabel = path.basename(effectiveCwd);
-      console.error(`▶ [${cwdLabel}] ${promptPreview}`);
 
-      const startTime = Date.now();
-
-      try {
-        debugLog(`[Debug] Attempting to execute Claude CLI with prompt: "${prompt}" in CWD: "${effectiveCwd}"`);
-
-        // Print tool info on first use
-        if (isFirstToolUse) {
-          const versionInfo = `claude_code v${SERVER_VERSION} started at ${serverStartupTime}`;
-          console.error(versionInfo);
-          isFirstToolUse = false;
-        }
-
-        const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', prompt];
-        debugLog(`[Debug] Invoking Claude CLI: ${this.claudeCliPath} ${claudeProcessArgs.join(' ')}`);
-
-        const { stdout, stderr } = await spawnAsync(
-          this.claudeCliPath, // Run the Claude CLI directly
-          claudeProcessArgs, // Pass the arguments
-          { timeout: executionTimeoutMs, cwd: effectiveCwd }
-        );
-
-        debugLog('[Debug] Claude CLI stdout:', stdout.trim());
-        if (stderr) {
-          debugLog('[Debug] Claude CLI stderr:', stderr.trim());
-        }
-
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        const outputLen = stdout.length;
-        console.error(`✓ [${cwdLabel}] done in ${duration}s (${outputLen} chars)`);
-
-        // Return stdout content, even if there was stderr, as claude-cli might output main result to stdout.
-        return { content: [{ type: 'text', text: stdout }] };
-
-      } catch (error: any) {
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.error(`✗ [${cwdLabel}] failed after ${duration}s — ${error.message || 'Unknown error'}`);
-        debugLog('[Error] Error executing Claude CLI:', error);
-
-        let errorMessage = error.message || 'Unknown error';
-        // Attempt to include stderr and stdout from the error object if spawnAsync attached them
-        if (error.stderr) {
-          errorMessage += `\nStderr: ${error.stderr}`;
-        }
-        if (error.stdout) {
-          errorMessage += `\nStdout: ${error.stdout}`;
-        }
-
-        if (error.signal === 'SIGTERM' || (error.message && error.message.includes('ETIMEDOUT')) || (error.code === 'ETIMEDOUT')) {
-          throw new McpError(ErrorCode.InternalError, `Claude CLI command timed out after ${executionTimeoutMs / 1000}s. Details: ${errorMessage}`);
-        }
-        throw new McpError(ErrorCode.InternalError, `Claude CLI execution failed: ${errorMessage}`);
+      // Duplicate detection
+      const key = taskKey(prompt, effectiveCwd);
+      const existing = runningTasks.get(key);
+      if (existing) {
+        const elapsed = Math.round((Date.now() - existing.startedAt) / 1000);
+        console.error(`⊘ [${cwdLabel}] duplicate request (task ${existing.id.slice(0, 8)}, running for ${elapsed}s)`);
+        return {
+          content: [{ type: 'text', text: `Task ID: ${existing.id}\nDuplicate request — already running for ${elapsed}s. Result will be delivered via message when complete.` }],
+        };
       }
+
+      // Generate task ID and register
+      const taskId = randomUUID();
+      runningTasks.set(key, { id: taskId, startedAt: Date.now() });
+
+      console.error(`▶ [${cwdLabel}] task ${taskId.slice(0, 8)} accepted — ${promptPreview}`);
+
+      // Print tool info on first use
+      if (isFirstToolUse) {
+        console.error(`claude_code v${SERVER_VERSION} started at ${serverStartupTime}`);
+        isFirstToolUse = false;
+      }
+
+      // Fire-and-forget: run Claude CLI in background, deliver result via Poke sendMessage
+      const cliPath = this.claudeCliPath;
+      const claudeProcessArgs = ['--dangerously-skip-permissions', '-p', prompt];
+
+      (async () => {
+        const startTime = Date.now();
+        try {
+          debugLog(`[Debug] Invoking Claude CLI: ${cliPath} ${claudeProcessArgs.join(' ')}`);
+
+          const { stdout, stderr } = await spawnAsync(
+            cliPath,
+            claudeProcessArgs,
+            { timeout: executionTimeoutMs, cwd: effectiveCwd }
+          );
+
+          debugLog('[Debug] Claude CLI stdout:', stdout.trim());
+          if (stderr) {
+            debugLog('[Debug] Claude CLI stderr:', stderr.trim());
+          }
+
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.error(`✓ [${cwdLabel}] task ${taskId.slice(0, 8)} done in ${duration}s (${stdout.length} chars)`);
+
+          // Deliver result via Poke
+          const message = `Task ID: ${taskId}\n[Task ${taskId.slice(0, 8)} complete]\nDirectory: ${effectiveCwd}\nPrompt: ${promptPreview}\n---\n${stdout}`;
+          await deliverViaPoke(message);
+
+        } catch (error: any) {
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.error(`✗ [${cwdLabel}] task ${taskId.slice(0, 8)} failed after ${duration}s — ${error.message || 'Unknown error'}`);
+
+          let errorMessage = error.message || 'Unknown error';
+          if (error.stderr) errorMessage += `\nStderr: ${error.stderr}`;
+          if (error.stdout) errorMessage += `\nStdout: ${error.stdout}`;
+
+          // Deliver error via Poke
+          const message = `Task ID: ${taskId}\n[Task ${taskId.slice(0, 8)} failed]\nDirectory: ${effectiveCwd}\nPrompt: ${promptPreview}\n---\n${errorMessage}`;
+          await deliverViaPoke(message);
+
+        } finally {
+          runningTasks.delete(key);
+        }
+      })();
+
+      // Return immediately
+      return {
+        content: [{ type: 'text', text: `Task ID: ${taskId}\nTask accepted. Running in background — result will be delivered via message when complete.` }],
+      };
     });
   }
 

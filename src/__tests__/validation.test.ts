@@ -8,6 +8,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 vi.mock('node:child_process');
 vi.mock('node:fs');
 vi.mock('node:os');
+vi.mock('poke', () => ({
+  Poke: vi.fn().mockImplementation(() => ({
+    sendMessage: vi.fn().mockResolvedValue({ success: true, message: 'ok' }),
+  })),
+}));
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
   Server: vi.fn()
 }));
@@ -164,35 +169,34 @@ describe('Argument Validation Tests', () => {
   });
 
   describe('Runtime Argument Validation', () => {
-    it('should validate workFolder is a string when provided', async () => {
+    it('should accept non-string workFolder gracefully (falls back to default cwd)', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
       setupServerMock();
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       const server = new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
+
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
       );
-      
+
       const handler = callToolCall[1];
-      
-      // Test with non-string workFolder
-      await expect(
-        handler({
-          params: {
-            name: 'claude_code',
-            arguments: {
-              prompt: 'test',
-              workFolder: 123 // Invalid type
-            }
+
+      // Non-string workFolder is ignored, handler returns task accepted
+      const result = await handler({
+        params: {
+          name: 'claude_code',
+          arguments: {
+            prompt: 'test workfolder validation',
+            workFolder: 123 // Invalid type — ignored
           }
-        })
-      ).rejects.toThrow();
+        }
+      });
+      expect(result.content[0].text).toMatch(/Task .+ accepted/);
     });
 
     it('should handle empty string prompt', async () => {

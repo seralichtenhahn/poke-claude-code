@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { PokeTunnel, isLoggedIn, login } from 'poke';
-import { ClaudeCodeServer } from './server.js';
+import { ClaudeCodeServer, runningTaskCount } from './server.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const POKE_NAME = process.env.POKE_NAME || 'claude-code-mcp';
@@ -172,7 +172,8 @@ try {
 
 // Graceful shutdown
 async function shutdown() {
-  log('shutting down...');
+  const tasks = runningTaskCount();
+  log(`shutting down...${tasks > 0 ? ` (${tasks} background tasks still running)` : ''}`);
 
   await tunnel.stop();
 

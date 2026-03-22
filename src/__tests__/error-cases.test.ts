@@ -10,6 +10,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 vi.mock('node:child_process');
 vi.mock('node:fs');
 vi.mock('node:os');
+vi.mock('poke', () => ({
+  Poke: vi.fn().mockImplementation(() => ({
+    sendMessage: vi.fn().mockResolvedValue({ success: true, message: 'ok' }),
+  })),
+}));
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
   Server: vi.fn()
 }));
@@ -100,20 +105,18 @@ describe('Error Handling Tests', () => {
       ).rejects.toThrow('Tool unknown_tool not found');
     });
 
-    it('should handle timeout errors', async () => {
+    it('should return task accepted for valid requests (async execution)', async () => {
       mockHomedir.mockReturnValue('/home/user');
       mockExistsSync.mockReturnValue(true);
       setupServerMock();
-      
+
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      const { McpError } = await import('@modelcontextprotocol/sdk/types.js');
-      
+
       const server = new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
-      // Find the callTool handler
+
       let callToolHandler: any;
       for (const call of mockServerInstance.setRequestHandler.mock.calls) {
         if (call[0].name === 'callTool') {
@@ -121,44 +124,30 @@ describe('Error Handling Tests', () => {
           break;
         }
       }
-      
-      // Mock spawn 
+
+      // Mock spawn
       mockSpawn.mockImplementation(() => {
         const mockProcess = new EventEmitter() as any;
         mockProcess.stdout = new EventEmitter();
         mockProcess.stderr = new EventEmitter();
-        
         mockProcess.stdout.on = vi.fn();
         mockProcess.stderr.on = vi.fn();
-        
-        setImmediate(() => {
-          const timeoutError: any = new Error('ETIMEDOUT');
-          timeoutError.code = 'ETIMEDOUT';
-          mockProcess.emit('error', timeoutError);
-        });
-        
         return mockProcess;
       });
-      
-      // Call handler
-      try {
-        await callToolHandler({
-          params: {
-            name: 'claude_code',
-            arguments: {
-              prompt: 'test',
-              workFolder: '/tmp'
-            }
+
+      // Handler should return immediately with task accepted
+      const result = await callToolHandler({
+        params: {
+          name: 'claude_code',
+          arguments: {
+            prompt: 'test timeout',
+            workFolder: '/tmp'
           }
-        });
-        expect.fail('Should have thrown');
-      } catch (err: any) {
-        // Check if McpError was called with the timeout message
-        expect(McpError).toHaveBeenCalledWith(
-          'InternalError',
-          expect.stringMatching(/Claude CLI command timed out/)
-        );
-      }
+        }
+      });
+
+      expect(result.content[0].text).toMatch(/^Task ID: [0-9a-f-]{36}\n/);
+      expect(result.content[0].text).toMatch(/Task accepted/);
     });
 
     it('should handle invalid argument types', async () => {
@@ -168,83 +157,21 @@ describe('Error Handling Tests', () => {
       const module = await import('../server.js');
       // @ts-ignore
       const { ClaudeCodeServer } = module;
-      
+
       const server = new ClaudeCodeServer();
       const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
+
       const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
         (call: any[]) => call[0].name === 'callTool'
       );
-      
+
       const handler = callToolCall[1];
-      
+
       await expect(
         handler({
           params: {
             name: 'claude_code',
             arguments: 'invalid-should-be-object'
-          }
-        })
-      ).rejects.toThrow();
-    });
-
-    it('should include CLI error details in error message', async () => {
-      mockHomedir.mockReturnValue('/home/user');
-      mockExistsSync.mockReturnValue(true);
-      setupServerMock();
-      
-      const module = await import('../server.js');
-      // @ts-ignore
-      const { ClaudeCodeServer } = module;
-      
-      const server = new ClaudeCodeServer();
-      const mockServerInstance = vi.mocked(Server).mock.results[0].value;
-      
-      const callToolCall = mockServerInstance.setRequestHandler.mock.calls.find(
-        (call: any[]) => call[0].name === 'callTool'
-      );
-      
-      const handler = callToolCall[1];
-      
-      // Create a simple mock process
-      mockSpawn.mockImplementation(() => {
-        const mockProcess = Object.create(EventEmitter.prototype);
-        EventEmitter.call(mockProcess);
-        mockProcess.stdout = Object.create(EventEmitter.prototype);
-        EventEmitter.call(mockProcess.stdout);
-        mockProcess.stderr = Object.create(EventEmitter.prototype);
-        EventEmitter.call(mockProcess.stderr);
-        
-        mockProcess.stdout.on = vi.fn((event, callback) => {
-          if (event === 'data') {
-            // Send some stdout data
-            process.nextTick(() => callback('stdout content'));
-          }
-        });
-        
-        mockProcess.stderr.on = vi.fn((event, callback) => {
-          if (event === 'data') {
-            // Send some stderr data
-            process.nextTick(() => callback('stderr content'));
-          }
-        });
-        
-        // Emit error/close event after data is sent
-        setTimeout(() => {
-          mockProcess.emit('close', 1);
-        }, 1);
-        
-        return mockProcess;
-      });
-      
-      await expect(
-        handler({
-          params: {
-            name: 'claude_code',
-            arguments: {
-              prompt: 'test',
-              workFolder: '/tmp'
-            }
           }
         })
       ).rejects.toThrow();

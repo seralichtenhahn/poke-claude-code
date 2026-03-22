@@ -10,6 +10,11 @@ import { EventEmitter } from 'node:events';
 vi.mock('node:child_process');
 vi.mock('node:fs');
 vi.mock('node:os');
+vi.mock('poke', () => ({
+  Poke: vi.fn().mockImplementation(() => ({
+    sendMessage: vi.fn().mockResolvedValue({ success: true, message: 'ok' }),
+  })),
+}));
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
 vi.mock('@modelcontextprotocol/sdk/types.js', () => ({
   ListToolsRequestSchema: { name: 'listTools' },
@@ -457,15 +462,9 @@ describe('ClaudeCodeServer Unit Tests', () => {
         }
       });
       
-      // Simulate successful execution
-      setTimeout(() => {
-        mockProcess.stdout['data']('tool output');
-        mockProcess.emit('close', 0);
-      }, 10);
-      
       const result = await promise;
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toBe('tool output');
+      expect(result.content[0].text).toMatch(/Task .+ accepted/);
     });
 
     it('should handle non-existent workFolder', async () => {
@@ -504,23 +503,16 @@ describe('ClaudeCodeServer Unit Tests', () => {
       mockProcess.stderr.on = vi.fn();
       mockSpawn.mockReturnValue(mockProcess);
       
-      const promise = handler({
+      await handler({
         params: {
           name: 'claude_code',
           arguments: {
-            prompt: 'test',
+            prompt: 'test nonexistent',
             workFolder: '/nonexistent'
           }
         }
       });
-      
-      // Simulate execution
-      setTimeout(() => {
-        mockProcess.emit('close', 0);
-      }, 10);
-      
-      await promise;
-      
+
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('[Warning] Specified workFolder does not exist: /nonexistent.')
       );
