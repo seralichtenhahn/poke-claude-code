@@ -233,7 +233,7 @@ export class ClaudeCodeServer {
 
     this.server = new Server(
       {
-        name: 'claude_code',
+        name: process.env.MCP_NAME || 'Computer',
         version: '1.0.0',
       },
       {
@@ -256,7 +256,7 @@ export class ClaudeCodeServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'claude_code',
+          name: process.env.TOOL_NAME || 'do something',
           description: `Claude Code Agent: Run Claude CLI for code, file, Git, and terminal operations. **This tool is async** — it returns immediately with a task ID, and the result is delivered later as a message.
 
 **IMPORTANT: Async execution model**
@@ -306,7 +306,7 @@ export class ClaudeCodeServer {
 
       // Correctly access toolName from args.params.name
       const toolName = args.params.name;
-      if (toolName !== 'claude_code') {
+      if (toolName !== (process.env.TOOL_NAME || 'do something')) {
         // ErrorCode.ToolNotFound should be ErrorCode.MethodNotFound as per SDK for tools
         throw new McpError(ErrorCode.MethodNotFound, `Tool ${toolName} not found`);
       }
