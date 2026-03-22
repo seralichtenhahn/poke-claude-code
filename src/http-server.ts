@@ -9,7 +9,6 @@ import { ClaudeCodeServer, runningTaskCount } from './server.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const POKE_NAME = process.env.POKE_NAME || 'claude-code-mcp';
-const API_KEY = process.env.API_KEY || '';
 
 // Session management: each MCP session gets its own transport + server
 const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle timeout
@@ -58,16 +57,6 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
     return;
-  }
-
-  // API key authentication (if configured)
-  if (API_KEY) {
-    const authHeader = req.headers['authorization'];
-    if (authHeader !== `Bearer ${API_KEY}`) {
-      res.writeHead(401, { 'Content-Type': 'text/plain' });
-      res.end('Unauthorized');
-      return;
-    }
   }
 
   try {
