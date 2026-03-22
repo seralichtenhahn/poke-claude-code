@@ -1,5 +1,5 @@
 {
-  "name": "@steipete/claude-code-mcp",
+  "name": "poke-claude-code/claude-code-mcp",
   "version": "1.10.12",
   "description": "Simple MCP server for Claude Code one-shot execution",
   "author": "Peter Steinberger",
